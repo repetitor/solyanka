@@ -7,7 +7,7 @@ services:
       - xpack.security.enabled=false
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
-      - "${ES_PORT:-9200}:9200"
+      - "${ES_PORT:-9202}:9200"
     volumes:
       - es-data:/usr/share/elasticsearch/data
 
@@ -29,7 +29,7 @@ services:
       - DISABLE_SECURITY_PLUGIN=true
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
-      - "${OPENSEARCH_PORT:-9200}:9200"
+      - "${OPENSEARCH_PORT:-9203}:9200"
     volumes:
       - opensearch-data:/usr/share/opensearch/data
 
@@ -40,10 +40,96 @@ services:
       - 'OPENSEARCH_HOSTS=["http://opensearch:9200"]'
       - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
     ports:
-      - "${OPENSEARCH_DASHBOARDS_PORT:-5601}:5601"
+      - "${OPENSEARCH_DASHBOARDS_PORT:-5602}:5601"
     depends_on:
       - opensearch
+
+  elasticsearch-secure:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION:-9.4.2}
+    container_name: solyanka-es-secure
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - ELASTIC_PASSWORD=${ES_SECURE_PASSWORD:-Solyanka2026!}
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "${ES_SECURE_PORT:-9205}:9200"
+    volumes:
+      - es-secure-data:/usr/share/elasticsearch/data
+
+  es-secure-setup:
+    image: curlimages/curl:latest
+    container_name: solyanka-es-secure-setup
+    depends_on:
+      - elasticsearch-secure
+    environment:
+      - ES_SECURE_PASSWORD=${ES_SECURE_PASSWORD:-Solyanka2026!}
+      - KIBANA_SYSTEM_PASSWORD=${KIBANA_SYSTEM_PASSWORD:-KibanaSys2026!}
+    volumes:
+      - ./docker/es-secure-setup.sh:/setup.sh:ro
+    entrypoint: ["sh", "/setup.sh"]
+
+  kibana-secure:
+    image: docker.elastic.co/kibana/kibana:${ES_VERSION:-9.4.2}
+    container_name: solyanka-kibana-secure
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch-secure:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD:-KibanaSys2026!}
+    ports:
+      - "${KIBANA_SECURE_PORT:-5603}:5601"
+    depends_on:
+      elasticsearch-secure:
+        condition: service_started
+      es-secure-setup:
+        condition: service_completed_successfully
+
+  opensearch-secure:
+    image: opensearchproject/opensearch:${OPENSEARCH_VERSION:-2.17.1}
+    container_name: solyanka-opensearch-secure
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_SECURE_PASSWORD:-Solyanka2026!}
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "${OPENSEARCH_SECURE_PORT:-9204}:9200"
+    volumes:
+      - opensearch-secure-data:/usr/share/opensearch/data
+      - opensearch-secure-config:/usr/share/opensearch/config   # shared with opensearch-secure-setup (needs the certs to run securityadmin)
+
+  opensearch-secure-setup:
+    image: opensearchproject/opensearch:${OPENSEARCH_VERSION:-2.17.1}
+    container_name: solyanka-opensearch-secure-setup
+    depends_on:
+      - opensearch-secure
+    environment:
+      - OPENSEARCH_SECURE_PASSWORD=${OPENSEARCH_SECURE_PASSWORD:-Solyanka2026!}
+      - KIBANASERVER_PASSWORD=${KIBANASERVER_PASSWORD:-KibanaServer2026!}
+    volumes:
+      - opensearch-secure-config:/usr/share/opensearch/config
+      - ./docker/opensearch-secure-setup.sh:/setup.sh:ro
+    entrypoint: ["bash", "/setup.sh"]
+
+  opensearch-dashboards-secure:
+    image: opensearchproject/opensearch-dashboards:${OPENSEARCH_VERSION:-2.17.1}
+    container_name: solyanka-opensearch-dashboards-secure
+    environment:
+      - 'OPENSEARCH_HOSTS=["https://opensearch-secure:9200"]'
+      - OPENSEARCH_USERNAME=kibanaserver
+      - OPENSEARCH_PASSWORD=${KIBANASERVER_PASSWORD:-KibanaServer2026!}
+      - OPENSEARCH_SSL_VERIFICATIONMODE=none
+    ports:
+      - "${OPENSEARCH_DASHBOARDS_SECURE_PORT:-5604}:5601"
+    depends_on:
+      opensearch-secure:
+        condition: service_started
+      opensearch-secure-setup:
+        condition: service_completed_successfully
 
 volumes:
   es-data:
   opensearch-data:
+  es-secure-data:
+  opensearch-secure-data:
+  opensearch-secure-config:
